@@ -1,0 +1,10 @@
+# Developer-only (binary parsing for TCP replay verification)
+dev/
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+# Build artifacts
+*.egg-info/
+dist/
+build/
