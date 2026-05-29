@@ -10,12 +10,12 @@
 ## 能做什么
 
 - **排板前** — 看封单量变化趋势，判断要不要排
-- **排队中** — 实时知道"我前面多少人/多少手/多少钱"和"我后面多少人"
-- **关键时刻** — 前面有人大额撤单、封单快速萎缩，立刻收到通知
-- **成交瞬间** — 排到了马上知道，不再傻等
+- **排队中** — 实时知道"我前面大约多少人/多少手/多少钱"和"我后面大约多少人"
+- **关键时刻** — 前面有大单撤了、封单快速萎缩，立刻收到通知
+- **撤单了** — 撤完回调里拿到状态，不用切回券商确认
 - **炸板预警** — 涨停价位即将消失/已消失，第一时间撤退
 
-核心原理：库自动订阅涨停买一档的逐笔排队数据，通过手数自动匹配你的委托 ID，然后持续追踪你前后每一笔委托的增减变化。
+核心原理：库自动订阅涨停买一档的逐笔排队数据，根据你报的手数推测你的委托 ID，然后持续追踪你前后每一笔委托的增减变化。**注意：ID 匹配基于手数推测，当同一价位出现相同手数时可能误判，不构成精确的成交回报。**
 
 ## 安装
 
@@ -60,11 +60,11 @@ idx = watcher.queue(hand_count=100)
 @watcher.on_tick
 def my_strategy(w):
     for i, entry in enumerate(w.my_orders):
-        if entry.status == 2:  # 已匹配到我的单子
+        if entry.status == 2:  # 已匹配到我的单子（根据手数推测）
 
-            # 快排到了！
+            # 前面不多了，可能快排到了
             if entry.front.amount < 50:
-                print(f"前面只剩 {entry.front.amount} 万，准备成交！")
+                print(f"前面只剩约 {entry.front.amount} 万")
 
             # 前面有大户跑了，我也撤
             if entry.front.last_reduction > 100:
@@ -78,7 +78,7 @@ def my_strategy(w):
 
 @watcher.on_fill
 def on_fill(w, entry):
-    print(f"排到了！等了 {entry.queue_elapsed_ms/1000:.0f} 秒")
+    print(f"推测已成交！等了约 {entry.queue_elapsed_ms/1000:.0f} 秒")
 ```
 
 ## API 速查
@@ -105,15 +105,15 @@ def on_fill(w, entry):
 | `cancel(entry_index)` | 告诉库"我撤单了" |
 | `on_snapshot(cb)` | 封板出现时回调 |
 | `on_tick(cb)` | 每次数据更新回调（主战场） |
-| `on_fill(cb)` | 排到你了回调 |
+| `on_fill(cb)` | 推测成交回调（基于手数匹配，非精确回报） |
 | `on_limit_gone(cb)` | 炸板回调 |
 
 ### MyQueueEntry — 你的排单位置
 
 | 字段 | 含义 |
 |------|------|
-| `status` | 1=排队中(未匹配) 2=排队中(已匹配) 100=成交了 |
-| `found_id` | 匹配到的委托 ID（库自动找的） |
+| `status` | 1=排队中(未匹配) 2=排队中(已匹配) 100=推测已成交 |
+| `found_id` | 根据手数推测的委托 ID（0=未匹配） |
 | `front.amount` | 你前面还有多少万元 |
 | `front.volume` | 你前面还有多少手 |
 | `front.last_reduction` | 刚才你前面减少了多少万 |
