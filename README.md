@@ -1,32 +1,36 @@
 # limit_up_watcher
 
-涨停板排队监控 Python 库 — 基于达塔接口 D201 WebSocket 的 `price`（单个价位）数据类型。
+**大A打板神器 — 涨停板排队实时监控库**
 
-## 功能
+打板最怕什么？排进去了却不知道前面还有多少单子，撤单了也不知道是自己撤的还是被别人挤掉的。
+这个库让你在排涨停的每一秒都清清楚楚：**前面还有多少手、后面追了多少手、谁在撤、谁在吃。**
 
-- 连接本地 `ws://127.0.0.1:8080/d201` 订阅 `price` 数据
-- 自动维护涨停价位排队队列（id 有序数组、二分查找）
-- 通过手数自动匹配你的委托 ID
-- 实时追踪 **我前面/后面** 的排队量（手数、金额、笔数变化）
-- 回调机制：快照、tick、位置更新、成交、涨停消失
-- 线程安全，支持用户从任意线程调用 `queue()` / `cancel()`
+基于达塔接口 D201 的 Level-2 逐笔数据，数据从交易所到你的策略代码不到 1ms（localhost 通信），碾压市面上所有云端中转方案。
+
+## 能做什么
+
+- **排板前** — 看封单量变化趋势，判断要不要排
+- **排队中** — 实时知道"我前面多少人/多少手/多少钱"和"我后面多少人"
+- **关键时刻** — 前面有人大额撤单、封单快速萎缩，立刻收到通知
+- **成交瞬间** — 排到了马上知道，不再傻等
+- **炸板预警** — 涨停价位即将消失/已消失，第一时间撤退
+
+核心原理：库自动订阅涨停买一档的逐笔排队数据，通过手数自动匹配你的委托 ID，然后持续追踪你前后每一笔委托的增减变化。
 
 ## 安装
 
 ```bash
-pip install limit_up_watcher
-# 或
-pip install git+https://github.com/yourname/limit_up_watcher.git
+pip install git+https://github.com/baseredge/limit_up_watcher.git
 ```
 
 依赖: `websocket-client`
 
-## 快速开始
+## 5 分钟上手
 
 ```python
 from limit_up_watcher import LimitUpWatcher, WebSocketSource
 
-# 监控 SZ002177 涨停板买1档（7.95元 = 7950厘）
+# 盯住 SZ002177 涨停板买1档（7.95元 = 7950厘）
 watcher = LimitUpWatcher("SZ002177", price_li=7950)
 
 ws = WebSocketSource("ws://127.0.0.1:8080/d201")
@@ -34,80 +38,94 @@ ws.add_watcher(watcher)
 
 @watcher.on_snapshot
 def on_snap(w):
-    print(f"封单量: {w.first.amount}万 / {w.first.volume}手 / {w.first.count}笔")
+    """涨停价首次出现"""
+    print(f"封板！封单量: {w.first.amount}万 / {w.first.volume}手 / {w.first.count}笔")
 
 @watcher.on_tick
 def on_tick(w):
-    print(f"+{w.new_add.amount}万 -{w.cancelled.amount}万(撤) -{w.executed.amount}万(成交)")
+    """每次数据更新"""
+    print(f"+{w.new_add.amount}万(新排) -{w.cancelled.amount}万(撤) -{w.executed.amount}万(吃) "
+          f"= 净{w.net_change_amt}万 | 封单{w.current.amount}万")
 
-# 连接（阻塞）
+# 启动（阻塞）
 ws.connect()
 ```
 
-## API
+## 实战：排板 + 智能撤单
+
+```python
+# 你的券商下单后调用，告诉库"我排了 100 手"
+idx = watcher.queue(hand_count=100)
+
+@watcher.on_tick
+def my_strategy(w):
+    for i, entry in enumerate(w.my_orders):
+        if entry.status == 2:  # 已匹配到我的单子
+
+            # 快排到了！
+            if entry.front.amount < 50:
+                print(f"前面只剩 {entry.front.amount} 万，准备成交！")
+
+            # 前面有大户跑了，我也撤
+            if entry.front.last_reduction > 100:
+                w.cancel(i)
+                print("前面撤了 100 万，跟着撤！")
+
+            # 封单要撑不住了
+            if w.limit_up_may_gone:
+                w.cancel(i)
+                print("封单快没了，先撤！")
+
+@watcher.on_fill
+def on_fill(w, entry):
+    print(f"排到了！等了 {entry.queue_elapsed_ms/1000:.0f} 秒")
+```
+
+## API 速查
 
 ### LimitUpWatcher(code, price_li, direction=0)
 
 | 属性 | 类型 | 说明 |
 |------|------|------|
-| `current` | TickAggregate | 当前总封单 (count/volume/amount) |
-| `new_add` | TickAggregate | 本次新增委托 |
-| `cancelled` | TickAggregate | 本次撤销委托 |
-| `executed` | TickAggregate | 本次成交委托 |
-| `first` | TickAggregate | 首次快照时的封单 |
-| `my_orders` | list[MyQueueEntry] | 我的排队列表 |
-| `records` | list[QueueRecord] | 当前队列（按 id 有序） |
-| `limit_up_gone` | bool | 涨停价位是否已消失 |
-| `limit_up_may_gone` | bool | 价位是否即将消失 |
-| `inflow_streak` | int | 连续流入 tick 数 |
-| `outflow_streak` | int | 连续流出 tick 数 |
+| `current` | TickAggregate | 当前总封单（万元/手/笔） |
+| `new_add` | TickAggregate | 本次新增排单 |
+| `cancelled` | TickAggregate | 本次撤单 |
+| `executed` | TickAggregate | 本次被吃掉的单 |
+| `first` | TickAggregate | 涨停时刻的初始封单 |
+| `my_orders` | list[MyQueueEntry] | 我的所有排单记录 |
+| `limit_up_gone` | bool | 涨停板是不是炸了 |
+| `limit_up_may_gone` | bool | 封单快速萎缩预警 |
+| `inflow_streak` | int | 连续多少 tick 有资金在排 |
+| `outflow_streak` | int | 连续多少 tick 在流出 |
 | `net_change_amt` | int | 本次净增金额(万元) |
 
-| 方法 | 说明 |
+| 方法 | 作用 |
 |------|------|
-| `queue(hand_count, order_id=0)` | 我已排板，返回 entry_index |
-| `cancel(entry_index)` | 我已撤单 |
-| `on_snapshot(cb)` | 注册快照回调 |
-| `on_tick(cb)` | 注册 tick 回调 |
-| `on_position_update(cb)` | 注册位置更新回调 |
-| `on_fill(cb)` | 注册成交回调 |
-| `on_limit_gone(cb)` | 注册涨停消失回调 |
+| `queue(hand_count)` | 告诉库"我排板了 N 手" |
+| `cancel(entry_index)` | 告诉库"我撤单了" |
+| `on_snapshot(cb)` | 封板出现时回调 |
+| `on_tick(cb)` | 每次数据更新回调（主战场） |
+| `on_fill(cb)` | 排到你了回调 |
+| `on_limit_gone(cb)` | 炸板回调 |
 
-### MyQueueEntry
+### MyQueueEntry — 你的排单位置
 
-| 字段 | 说明 |
+| 字段 | 含义 |
 |------|------|
-| `status` | 0=空, 1=已排队未匹配, 2=排队已匹配, 3=已撤单, 100=已成交 |
-| `found_id` | 匹配到的委托 ID（0=未匹配） |
-| `front` | MyQueueSide: 我前面的排队（volume/amount/last_reduction） |
-| `back` | MyQueueSide: 我后面的排队 |
-| `queue_elapsed_ms` | 已排队毫秒 |
+| `status` | 1=排队中(未匹配) 2=排队中(已匹配) 100=成交了 |
+| `found_id` | 匹配到的委托 ID（库自动找的） |
+| `front.amount` | 你前面还有多少万元 |
+| `front.volume` | 你前面还有多少手 |
+| `front.last_reduction` | 刚才你前面减少了多少万 |
+| `back.amount` | 你后面追了多少万元 |
+| `queue_elapsed_ms` | 排了多久（毫秒） |
 
-## 价格单位
+## 注意事项
 
-| 字段 | 单位 | 转元 |
-|------|------|------|
-| `price_li` (构造参数) | 厘 | ÷1000 |
-| `price_fen` | 分 | ÷100 |
-| `amount` (聚合) | 万元 | 即万元 |
-| `volume` (手数) | 手 | ×100=股 |
-
-## 策略示例
-
-```python
-@watcher.on_tick
-def my_strategy(w):
-    for i, entry in enumerate(w.my_orders):
-        if entry.status == 2:  # 已匹配
-            # 前面减少了很多 → 考虑撤单
-            if entry.front.last_reduction > 50:
-                w.cancel(i)
-                print("前面大额撤单，我也撤")
-            
-            # 快排到了
-            if entry.front.amount < 100:
-                print("快排到了！")
-```
+- 需要先在本地启动 [达塔接口](https://lty.gt.tc/dapi/) 并登录
+- 价格单位 `price_li` 用厘：`元 × 1000`，如 7.95 元 = `7950`
+- 金额单位是**万元**，手数单位是**手**（1手=100股）
+- 如果你撤单了，记得调 `cancel(entry_index)`，否则状态不会更新
 
 ## License
 
