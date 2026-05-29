@@ -27,8 +27,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourname/limit_up_watcher"
-Repository = "https://github.com/yourname/limit_up_watcher"
+Homepage = "https://github.com/baseredge/limit_up_watcher"
+Repository = "https://github.com/baseredge/limit_up_watcher"
 
 [tool.setuptools.packages.find]
 include = ["limit_up_watcher*"]
