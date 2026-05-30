@@ -1,5 +1,7 @@
 # Developer-only (binary parsing for TCP replay verification)
 dev/
+# Internal docs (not for public)
+PUSH_RULES.md
 # Python cache
 __pycache__/
 *.pyc
