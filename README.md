@@ -49,6 +49,8 @@
 ## 安装
 
 ```bash
+pip install limit_up_watcher
+# 或直接用 git
 pip install git+https://github.com/baseredge/limit_up_watcher.git
 ```
 
