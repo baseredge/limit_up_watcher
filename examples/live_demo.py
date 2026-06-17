@@ -62,38 +62,32 @@ def main():
     def on_gone(w):
         print(f"[涨停消失] {w.code} 封板已打开")
 
-    # 启动输入线程（模拟用户排板/撤单）
-    print("\n输入命令: q=排板100手, c=撤单, 回车退出\n")
-    input_ready = threading.Event()
+    # 启动输入循环（模拟用户排板/撤单）
+    print("\n输入命令: q=排板100手, c=撤单, s=查封单, 回车退出\n")
 
-    def on_input():
-        while input_ready.is_set():
-            try:
-                cmd = input().strip()
-                if not cmd:
-                    break
-                if cmd == "q":
-                    idx = watcher.queue(hand_count=100)
-                    print(f">>> 排板100手, entry={idx}")
-                elif cmd == "c":
-                    for i, e in enumerate(watcher.my_orders):
-                        if e.status != 3:
-                            watcher.cancel(i)
-                            print(f">>> 撤单 entry={i}")
-                elif cmd == "s":
-                    print(f"封单={watcher.current.amount}万/{watcher.current.count}笔")
-            except EOFError:
-                break
-
-    # 主线程跑 WebSocket
+    # 主线程跑 WebSocket (后台), 主线程读输入
     print("连接 D201...")
     threading.Thread(target=ws.connect, kwargs={"block": True}, daemon=True).start()
     time.sleep(1)
 
-    input_ready.set()
-    on_input()
+    while True:
+        try:
+            cmd = input().strip()
+        except EOFError:
+            break
+        if not cmd:
+            break
+        if cmd == "q":
+            idx = watcher.queue(hand_count=100)
+            print(f">>> 排板100手, entry={idx}")
+        elif cmd == "c":
+            for i, e in enumerate(watcher.my_orders):
+                if e.status != 3:
+                    watcher.cancel(i)
+                    print(f">>> 撤单 entry={i}")
+        elif cmd == "s":
+            print(f"封单={watcher.current.amount}万/{watcher.current.count}笔")
 
-    input_ready.clear()
     ws.disconnect()
     print("已断开")
 

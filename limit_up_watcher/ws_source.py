@@ -2,7 +2,7 @@
 import json
 import threading
 import logging
-from typing import Callable, Optional
+from typing import Optional
 
 from .types import PricePacket, PriceRecord
 from .watcher import LimitUpWatcher
@@ -55,24 +55,30 @@ class WebSocketSource:
             self._thread.start()
 
     def disconnect(self):
+        """断开连接并等待后台线程退出"""
         self._running = False
         if self._ws:
             self._ws.close()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
 
     def _on_open(self, ws):
         logger.info("D201 connected")
         # 为每个 watcher 发送订阅
         with self._lock:
-            for w in self._watchers:
-                cmd = {
-                    "type": "price",
-                    "code": w.code,
-                    "enable": 1,
-                    "direction": w.direction,
-                    "priceCent": w.price_li,
-                }
-                ws.send(json.dumps([cmd]))
-                logger.info("subscribed: %s price=%d", w.code, w.price_li)
+            watchers = list(self._watchers)
+        for w in watchers:
+            cmd = {
+                "type": "price",
+                "code": w.code,
+                "enable": 1,
+                "direction": w.direction,
+                # 字段名 priceCent 表明单位是"分"; price_li 是厘, 需 ÷10
+                "priceCent": w.price_fen,
+            }
+            ws.send(json.dumps([cmd]))
+            logger.info("subscribed: %s price_fen=%d", w.code, w.price_fen)
 
     def _on_message(self, ws, text: str):
         try:
@@ -85,7 +91,8 @@ class WebSocketSource:
         if not items:
             return
 
-        # 按 watcher 分组 batch
+        # 按 watcher.code 分组 batch
+        # (价位/方向过滤由 LimitUpWatcher._process_packet 负责)
         batches: dict[str, list[PricePacket]] = {}
         for item in items:
             if item.get("type") != "price":
@@ -96,10 +103,11 @@ class WebSocketSource:
                 batches.setdefault(pkt.code, []).append(pkt)
 
         with self._lock:
-            for w in self._watchers:
-                pkts = batches.get(w.code, [])
-                if pkts:
-                    w.feed_batch(pkts, ts)
+            watchers = list(self._watchers)
+        for w in watchers:
+            pkts = batches.get(w.code, [])
+            if pkts:
+                w.feed_batch(pkts, ts)
 
     @staticmethod
     def _parse_price_data(data: dict, ts: int) -> Optional[PricePacket]:
@@ -115,6 +123,7 @@ class WebSocketSource:
             price_li=data.get("price", 0),
             is_first=is_first,
             cur_count=data.get("curCount", len(records_data)),
+            timestamp=ts,
         )
 
         if is_first == 1:
@@ -132,7 +141,6 @@ class WebSocketSource:
             )
             for r in records_data
         ]
-        pkt.timestamp = ts
         return pkt
 
     def _on_error(self, ws, error):

@@ -1,7 +1,7 @@
 """涨停观察器数据类型 — 移植自 limit_up_sim/types.hpp + observer.hpp"""
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List
 
 
 @dataclass
@@ -38,7 +38,7 @@ class MyQueueEntry:
     order_id: int = 0            # 我的委托号 (0=未知)
     hand_count: int = 0          # 我的手数 (-1=匹配任意)
     found_id: int = 0            # 在队列中匹配到的 id (0=未匹配)
-    status: int = 0              # 0=空, 1=已排队未匹配, 2=排队已匹配, 100=已成交
+    status: int = 0              # 0=空, 1=已排队未匹配, 2=排队已匹配, 3=已撤, 100=已成交
     front: MyQueueSide = field(default_factory=MyQueueSide)  # 前面的排队
     back: MyQueueSide = field(default_factory=MyQueueSide)   # 后面的排队
     queue_elapsed_ms: int = 0    # 已排队毫秒
@@ -51,6 +51,7 @@ class PricePacket:
     direction: int = 0     # 0=买, 1=卖
     price_li: int = 0      # 价位 (厘, ÷10=分)
     is_first: int = 0      # 1=首次全量快照, 0=增量更新
+    timestamp: int = 0     # 数据时间戳 (epoch ms)
     # isFirst=1 字段
     total_volume: int = 0
     total_amount: int = 0
@@ -58,7 +59,7 @@ class PricePacket:
     seq: int = 0
     cur_count: int = 0
     # 记录列表
-    records: list = field(default_factory=list)
+    records: List[PriceRecord] = field(default_factory=list)
 
     @property
     def price_fen(self) -> int:
